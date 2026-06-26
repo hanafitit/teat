@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
 
@@ -39,7 +40,9 @@ namespace Probe4
                         "--disable-dev-shm-usage",
                         "--enable-logging",
                         "--v=1",
-                        $"--log-net-log=net-log-{proxy.Host}.json"
+                        $"--log-net-log=net-log-{proxy.Host}.json",
+                        "--proxy-auth=basic",
+                        "--disable-features=IsolateOrigins,site-per-process"
                     }
                 };
 
@@ -56,6 +59,22 @@ namespace Probe4
                 Logger.Log($"[Proxy {proxy.Host}] Запуск PersistentContext...");
                 await using var context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
                 Logger.Log($"[Proxy {proxy.Host}] Контекст успешно запущен.");
+
+                // Решение через RouteAsync для принудительной вставки Proxy-Authorization
+                if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] Настройка RouteAsync для Proxy-Authorization...");
+                    var authHeader = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{proxy.Username}:{proxy.Password}"));
+
+                    await context.RouteAsync("**", async route =>
+                    {
+                        var headers = new Dictionary<string, string>(route.Request.Headers)
+                        {
+                            ["Proxy-Authorization"] = $"Basic {authHeader}"
+                        };
+                        await route.ContinueAsync(new RouteContinueOptions { Headers = headers });
+                    });
+                }
 
                 // Логирование на уровне контекста
                 context.RequestFailed += (_, e) => {
