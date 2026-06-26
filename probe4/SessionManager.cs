@@ -14,7 +14,7 @@ namespace Probe4
         public static async Task<SessionData?> RefreshSessionAsync(ProxyInfo proxy)
         {
             Environment.SetEnvironmentVariable("DEBUG", "pw:api,pw:browser,pw:network");
-            Logger.Log($"[Proxy {proxy.Host}] Начинаем процесс обновления сессии. Прокси: {proxy.Host}:{proxy.Port}, Пользователь: {(string.IsNullOrEmpty(proxy.Username) ? "нет" : proxy.Username)}");
+            Logger.Log($"[Monitoring Engine] Routing through local tunnel (127.0.0.1:18080) -> Target: {proxy.Host}:{proxy.Port}");
             string userDataDir = Path.Combine(Path.GetTempPath(), "playwright_profile_" + Guid.NewGuid().ToString());
             Logger.Log($"[Proxy {proxy.Host}] Временная директория профиля: {userDataDir}");
 
@@ -27,7 +27,7 @@ namespace Probe4
                 {
                     Headless = true,
                     Proxy = new Proxy {
-                        Server = $"http://{proxy.Host}:{proxy.Port}"
+                        Server = "http://127.0.0.1:18080"
                     },
                     UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 },
@@ -40,12 +40,13 @@ namespace Probe4
                         "--disable-dev-shm-usage",
                         "--enable-logging",
                         "--v=1",
-                        $"--log-net-log=net-log-{proxy.Host}.json",
+                        "--log-net-log=local-gost.json",
                         "--proxy-auth=basic",
                         "--disable-features=IsolateOrigins,site-per-process"
                     }
                 };
 
+                /*
                 if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
                 {
                     Logger.Log($"[Proxy {proxy.Host}] Установка глобальных HttpCredentials для контекста.");
@@ -55,11 +56,13 @@ namespace Probe4
                         Password = proxy.Password
                     };
                 }
+                */
 
                 Logger.Log($"[Proxy {proxy.Host}] Запуск PersistentContext...");
                 await using var context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
                 Logger.Log($"[Proxy {proxy.Host}] Контекст успешно запущен.");
 
+                /*
                 // Решение через RouteAsync для принудительной вставки Proxy-Authorization
                 if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
                 {
@@ -75,6 +78,7 @@ namespace Probe4
                         await route.ContinueAsync(new RouteContinueOptions { Headers = headers });
                     });
                 }
+                */
 
                 // Логирование на уровне контекста
                 context.RequestFailed += (_, e) => {
