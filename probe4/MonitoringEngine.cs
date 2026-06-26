@@ -26,10 +26,7 @@ namespace Probe4
 
             var handler = new SocketsHttpHandler
             {
-                Proxy = new WebProxy($"{proxy.Host}:{proxy.Port}")
-                {
-                    Credentials = new NetworkCredential(proxy.Username, proxy.Password)
-                },
+                Proxy = new WebProxy("http://127.0.0.1:18080"),
                 UseProxy = true,
                 UseCookies = true,
                 CookieContainer = _cookieContainer,
@@ -94,14 +91,14 @@ namespace Probe4
 
                 if (response.StatusCode == (HttpStatusCode)429)
                 {
-                    Logger.Log($"[Proxy {_proxy.Host}] 429 Too Many Requests. Banning for 60s.");
+                    Logger.Log("[Monitoring Engine] 429 Too Many Requests via Local Tunnel. Banning for 60s.");
                     _proxy.BannedUntil = DateTime.UtcNow.AddSeconds(60);
                     return new SkinResult { Name = skinName, Status = 429 };
                 }
 
                 if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
-                    Logger.Log($"[Proxy {_proxy.Host}] 403 Forbidden.");
+                    Logger.Log("[Monitoring Engine] 403 Forbidden via Local Tunnel.");
                     return new SkinResult { Name = skinName, Status = 403 };
                 }
 
