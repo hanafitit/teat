@@ -12,6 +12,7 @@ namespace Probe4
     {
         public static async Task<SessionData?> RefreshSessionAsync(ProxyInfo proxy)
         {
+            Environment.SetEnvironmentVariable("DEBUG", "pw:api,pw:browser,pw:network");
             Logger.Log($"[Proxy {proxy.Host}] Начинаем процесс обновления сессии. Прокси: {proxy.Host}:{proxy.Port}, Пользователь: {(string.IsNullOrEmpty(proxy.Username) ? "нет" : proxy.Username)}");
             string userDataDir = Path.Combine(Path.GetTempPath(), "playwright_profile_" + Guid.NewGuid().ToString());
             Logger.Log($"[Proxy {proxy.Host}] Временная директория профиля: {userDataDir}");
@@ -35,7 +36,10 @@ namespace Probe4
                         "--disable-setuid-sandbox",
                         "--disable-blink-features=AutomationControlled",
                         "--disable-gpu",
-                        "--disable-dev-shm-usage"
+                        "--disable-dev-shm-usage",
+                        "--enable-logging",
+                        "--v=1",
+                        $"--log-net-log=net-log-{proxy.Host}.json"
                     }
                 };
 
