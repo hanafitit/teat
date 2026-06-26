@@ -145,9 +145,17 @@ namespace Probe4
                 var warmUpScript = @"
                     async () => {
                         const url = '/5.0/load_bots_inventory/730?limit=1&offset=0&order=asc&sort=price';
+                        const headers = {
+                            'x-client-app': 'web',
+                            'X-Kl-Ajax-Request': 'Ajax_Request',
+                            'Accept': 'application/json, text/plain, */*',
+                            'sec-fetch-dest': 'empty',
+                            'sec-fetch-mode': 'cors',
+                            'sec-fetch-site': 'same-origin'
+                        };
                         for (let i = 0; i < 10; i++) {
                             try {
-                                const res = await fetch(url, { headers: { 'X-Client-App': 'web_mobile' } });
+                                const res = await fetch(url, { headers });
                                 if (res.status === 200) return true;
                             } catch (e) {}
                             await new Promise(r => setTimeout(r, 2000));
