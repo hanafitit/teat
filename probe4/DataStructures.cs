@@ -11,6 +11,7 @@ namespace Probe4
     {
         public List<Cookie> Cookies { get; set; } = new();
         public string UserAgent { get; set; } = "";
+        public string CookieString { get; set; } = "";
     }
 
     public class ProxyInfo
@@ -19,7 +20,7 @@ namespace Probe4
         public int Port { get; set; }
         public string Username { get; set; }
         public string Password { get; set; }
-        public HttpClient? Client { get; set; }
+        public MonitoringEngine? Engine { get; set; }
         public DateTime BannedUntil { get; set; } = DateTime.MinValue;
         public bool IsBanned => DateTime.UtcNow < BannedUntil;
 
