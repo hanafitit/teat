@@ -39,12 +39,22 @@ namespace Probe4
             new ProxyInfo("142.111.67.146", 5611, "ycmhblvu", "htols81cakkl")
         };
 
+        static SessionData? _currentSession;
         static DateTime _lastRefresh = DateTime.MinValue;
         static int _poolFailures = 0;
 
         static async Task Main(string[] args)
         {
-            Logger.Log("Starting Monitoring Engine v6 (Playwright Fetch)...");
+            // Disable default .NET telemetry headers (traceparent)
+            AppContext.SetSwitch("System.Net.Http.EnableActivityPropagation", false);
+
+            Logger.Log("Starting Monitoring Engine v5...");
+
+            // Initialize HttpClients
+            foreach (var p in ProxyList)
+            {
+                p.Client = MonitoringEngine.CreateHttpClient(p);
+            }
 
             var skinSet = new HashSet<string>(SkinNames);
             var random = new Random();
@@ -53,9 +63,9 @@ namespace Probe4
             while (true)
             {
                 bool forceRefresh = false;
-                if (_lastRefresh == DateTime.MinValue || (DateTime.UtcNow - _lastRefresh).TotalMinutes >= 15)
+                if (_currentSession == null || (DateTime.UtcNow - _lastRefresh).TotalMinutes >= 15)
                 {
-                    Logger.Log(_lastRefresh == DateTime.MinValue ? "Initial session refresh..." : "Scheduled 15-min session refresh...");
+                    Logger.Log(_currentSession == null ? "Initial session refresh..." : "Scheduled 15-min session refresh...");
                     forceRefresh = true;
                 }
 
@@ -68,25 +78,23 @@ namespace Probe4
 
                 if (forceRefresh)
                 {
-                    var refreshTasks = ProxyList.Select(p => SessionManager.SetupProxyPageAsync(p)).ToList();
-                    var results = await Task.WhenAll(refreshTasks);
-
-                    if (results.Any(r => r != null))
+                    _currentSession = await SessionManager.RefreshSessionAsync(ProxyList[0]);
+                    if (_currentSession != null)
                     {
                         _lastRefresh = DateTime.UtcNow;
                     }
                     else
                     {
-                        Logger.Log("Failed to refresh any proxy session. Retrying in 10 seconds...");
-                        await Task.Delay(10000);
+                        Logger.Log("Failed to refresh session. Retrying in 5 seconds...");
+                        await Task.Delay(5000);
                         continue;
                     }
                 }
 
-                var activeProxies = ProxyList.Where(p => !p.IsBanned && p.Page != null).ToList();
+                var activeProxies = ProxyList.Where(p => !p.IsBanned).ToList();
                 if (activeProxies.Count == 0)
                 {
-                    Logger.Log("No active proxies available (all banned or not initialized). Waiting 10 seconds...");
+                    Logger.Log("No active proxies available (all banned). Waiting 10 seconds...");
                     _poolFailures++;
                     await Task.Delay(10000);
                     continue;
@@ -102,10 +110,12 @@ namespace Probe4
                 {
                     var proxy = activeProxies[i];
                     var proxyItems = items.Skip(i * itemsPerProxy).Take(itemsPerProxy).ToList();
+                    var session = _currentSession;
 
                     cycleTasks.Add(Task.Run(async () => {
-                        var tasks = proxyItems.Select(item => MonitoringEngine.FetchSkinAsync(proxy, item)).ToList();
-                        return await Task.WhenAll(tasks);
+                        var tasks = proxyItems.Select(item => MonitoringEngine.FetchSkinAsync(proxy, item, session!)).ToList();
+                        var results = await Task.WhenAll(tasks);
+                        return results;
                     }));
                 }
 

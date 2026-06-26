@@ -19,8 +19,7 @@ namespace Probe4
         public int Port { get; set; }
         public string Username { get; set; }
         public string Password { get; set; }
-        public Microsoft.Playwright.IPage? Page { get; set; }
-        public Microsoft.Playwright.IBrowserContext? Context { get; set; }
+        public HttpClient? Client { get; set; }
         public DateTime BannedUntil { get; set; } = DateTime.MinValue;
         public bool IsBanned => DateTime.UtcNow < BannedUntil;
 

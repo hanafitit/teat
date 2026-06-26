@@ -9,15 +9,13 @@ namespace Probe4
 {
     public static class SessionManager
     {
-        private static IPlaywright? _playwright;
-        private static IBrowser? _browser;
-
-        public static async Task InitializePlaywrightAsync()
+        public static async Task<SessionData?> RefreshSessionAsync(ProxyInfo proxy)
         {
-            if (_playwright == null)
+            Logger.Log($"Refreshing session using proxy {proxy.Host}...");
+            try
             {
-                _playwright = await Playwright.CreateAsync();
-                _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                using var playwright = await Playwright.CreateAsync();
+                var launchOptions = new BrowserTypeLaunchOptions
                 {
                     Headless = true,
                     Proxy = new Proxy { Server = "http://per-context" },
@@ -28,24 +26,13 @@ namespace Probe4
                         "--disable-gpu",
                         "--disable-dev-shm-usage"
                     }
-                });
-            }
-        }
+                };
 
-        public static async Task<SessionData?> SetupProxyPageAsync(ProxyInfo proxy)
-        {
-            await InitializePlaywrightAsync();
-            Logger.Log($"Setting up page for proxy {proxy.Host}...");
-
-            try
-            {
-                if (proxy.Context != null) await proxy.Context.CloseAsync();
-
+                await using var browser = await playwright.Chromium.LaunchAsync(launchOptions);
                 var contextOptions = new BrowserNewContextOptions
                 {
                     UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    Proxy = new Proxy
-                    {
+                    Proxy = new Proxy {
                         Server = $"http://{proxy.Host}:{proxy.Port}",
                         Username = proxy.Username,
                         Password = proxy.Password
@@ -53,44 +40,33 @@ namespace Probe4
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
                 };
 
-                proxy.Context = await _browser!.NewContextAsync(contextOptions);
+                var context = await browser.NewContextAsync(contextOptions);
+                var page = await context.NewPageAsync();
 
-                await proxy.Context.AddInitScriptAsync(@"
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
-                    delete navigator.__proto__.webdriver;
-                    window.chrome = { runtime: {} };
-                ");
-
-                proxy.Page = await proxy.Context.NewPageAsync();
-
-                Logger.Log($"Navigating to cs.money on proxy {proxy.Host}...");
-                await proxy.Page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
+                Logger.Log("Navigating to cs.money...");
+                await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
                 {
                     WaitUntil = WaitUntilState.NetworkIdle,
                     Timeout = 60000
                 });
 
-                var cookies = await proxy.Context.CookiesAsync();
-                var userAgent = await proxy.Page.EvaluateAsync<string>("navigator.userAgent");
+                var cookies = await context.CookiesAsync();
+                var userAgent = await page.EvaluateAsync<string>("navigator.userAgent");
 
-                Logger.Log($"Page for {proxy.Host} is ready.");
-                return new SessionData
+                var session = new SessionData
                 {
                     UserAgent = userAgent,
                     Cookies = cookies.Select(c => new System.Net.Cookie(c.Name, c.Value, c.Path, c.Domain)).ToList()
                 };
+
+                Logger.Log("Session refreshed successfully.");
+                return session;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Failed to setup page for proxy {proxy.Host}", ex);
+                Logger.LogError("Failed to refresh session", ex);
                 return null;
             }
-        }
-
-        public static async Task CleanupAsync()
-        {
-            if (_browser != null) await _browser.CloseAsync();
-            if (_playwright != null) _playwright.Dispose();
         }
     }
 }
