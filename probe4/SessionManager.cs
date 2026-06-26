@@ -31,7 +31,7 @@ namespace Probe4
                 await using var browser = await playwright.Chromium.LaunchAsync(launchOptions);
                 var contextOptions = new BrowserNewContextOptions
                 {
-                    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     Proxy = new Proxy {
                         Server = $"http://{proxy.Host}:{proxy.Port}",
                         Username = proxy.Username,
@@ -56,7 +56,8 @@ namespace Probe4
                 var session = new SessionData
                 {
                     UserAgent = userAgent,
-                    Cookies = cookies.Select(c => new System.Net.Cookie(c.Name, c.Value, c.Path, c.Domain)).ToList()
+                    Cookies = cookies.Select(c => new System.Net.Cookie(c.Name, c.Value, c.Path, c.Domain)).ToList(),
+                    CookieString = string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}"))
                 };
 
                 Logger.Log("Session refreshed successfully.");

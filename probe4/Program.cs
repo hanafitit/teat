@@ -45,16 +45,10 @@ namespace Probe4
 
         static async Task Main(string[] args)
         {
-            // Disable default .NET telemetry headers (traceparent)
+            // Critical: Disable default .NET telemetry headers (traceparent)
             AppContext.SetSwitch("System.Net.Http.EnableActivityPropagation", false);
 
             Logger.Log("Starting Monitoring Engine v5...");
-
-            // Initialize HttpClients
-            foreach (var p in ProxyList)
-            {
-                p.Client = MonitoringEngine.CreateHttpClient(p);
-            }
 
             var skinSet = new HashSet<string>(SkinNames);
             var random = new Random();
@@ -82,6 +76,18 @@ namespace Probe4
                     if (_currentSession != null)
                     {
                         _lastRefresh = DateTime.UtcNow;
+                        // Initialize or update engines with new cookies
+                        foreach (var p in ProxyList)
+                        {
+                            if (p.Engine == null)
+                            {
+                                p.Engine = new MonitoringEngine(p, _currentSession.CookieString);
+                            }
+                            else
+                            {
+                                p.Engine.UpdateCookies(_currentSession.CookieString);
+                            }
+                        }
                     }
                     else
                     {
@@ -110,10 +116,9 @@ namespace Probe4
                 {
                     var proxy = activeProxies[i];
                     var proxyItems = items.Skip(i * itemsPerProxy).Take(itemsPerProxy).ToList();
-                    var session = _currentSession;
 
                     cycleTasks.Add(Task.Run(async () => {
-                        var tasks = proxyItems.Select(item => MonitoringEngine.FetchSkinAsync(proxy, item, session!)).ToList();
+                        var tasks = proxyItems.Select(item => proxy.Engine!.FetchSkinAsync(item)).ToList();
                         var results = await Task.WhenAll(tasks);
                         return results;
                     }));
