@@ -8,7 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Program_v4_playwright_inventory.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="DataStructures.cs" />
+    <Compile Include="SessionManager.cs" />
+    <Compile Include="MonitoringEngine.cs" />
   </ItemGroup>
 
   <ItemGroup>
