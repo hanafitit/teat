@@ -63,6 +63,7 @@ class Program
         var launchOptions = new BrowserTypeLaunchOptions
         {
             Headless = true,
+            Proxy = new Proxy { Server = "http://per-context" },
             Args = new[] {
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
