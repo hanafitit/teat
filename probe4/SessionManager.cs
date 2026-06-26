@@ -12,11 +12,14 @@ namespace Probe4
     {
         public static async Task<SessionData?> RefreshSessionAsync(ProxyInfo proxy)
         {
-            Logger.Log($"Refreshing session using proxy {proxy.Host}...");
+            Logger.Log($"[Proxy {proxy.Host}] Начинаем процесс обновления сессии. Прокси: {proxy.Host}:{proxy.Port}, Пользователь: {(string.IsNullOrEmpty(proxy.Username) ? "нет" : proxy.Username)}");
             string userDataDir = Path.Combine(Path.GetTempPath(), "playwright_profile_" + Guid.NewGuid().ToString());
+            Logger.Log($"[Proxy {proxy.Host}] Временная директория профиля: {userDataDir}");
+
             try
             {
                 using var playwright = await Playwright.CreateAsync();
+                Logger.Log($"[Proxy {proxy.Host}] Playwright инициализирован.");
 
                 var persistentOptions = new BrowserTypeLaunchPersistentContextOptions
                 {
@@ -38,6 +41,7 @@ namespace Probe4
 
                 if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
                 {
+                    Logger.Log($"[Proxy {proxy.Host}] Установка глобальных HttpCredentials для контекста.");
                     persistentOptions.HttpCredentials = new HttpCredentials
                     {
                         Username = proxy.Username,
@@ -45,7 +49,14 @@ namespace Probe4
                     };
                 }
 
+                Logger.Log($"[Proxy {proxy.Host}] Запуск PersistentContext...");
                 await using var context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
+                Logger.Log($"[Proxy {proxy.Host}] Контекст успешно запущен.");
+
+                // Логирование на уровне контекста
+                context.RequestFailed += (_, e) => {
+                    Logger.Log($"[NETWORK ERROR] [Proxy {proxy.Host}] Request Failed: {e.Method} {e.Url}. Error: {e.Failure}");
+                };
 
                 // Stealth scripts
                 await context.AddInitScriptAsync(@"
@@ -55,63 +66,86 @@ namespace Probe4
                 ");
 
                 var page = await context.NewPageAsync();
+                Logger.Log($"[Proxy {proxy.Host}] Новая страница создана.");
 
                 // Pipe browser console logs to C# console
                 page.Console += (_, e) => {
-                    var color = e.Type == "error" ? "RED" : "YELLOW";
                     Logger.Log($"[Browser {e.Type.ToUpper()}] [Proxy {proxy.Host}]: {e.Text}");
                 };
 
-                Logger.Log($"[Proxy {proxy.Host}] Navigating to cs.money...");
+                page.Response += (_, e) => {
+                    if (e.Status >= 400)
+                    {
+                        Logger.Log($"[NETWORK WARN] [Proxy {proxy.Host}] HTTP {e.Status}: {e.Request.Method} {e.Url}");
+                    }
+                };
+
+                Logger.Log($"[Proxy {proxy.Host}] Переход на cs.money...");
                 IResponse? response = null;
                 bool navSuccess = false;
                 for (int attempt = 1; attempt <= 3; attempt++)
                 {
                     try
                     {
+                        Logger.Log($"[Proxy {proxy.Host}] Попытка навигации {attempt}...");
                         response = await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
                         {
                             WaitUntil = WaitUntilState.DOMContentLoaded,
                             Timeout = 45000
                         });
+
+                        if (response != null)
+                        {
+                            Logger.Log($"[Proxy {proxy.Host}] Навигация завершена. Статус: {response.Status}");
+                            if (response.Status == 407)
+                            {
+                                Logger.Log($"[Proxy {proxy.Host}] ОШИБКА: Требуется Proxy Authentication (407). Проверьте логин/пароль.");
+                            }
+                        }
+
                         navSuccess = true;
                         break;
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"[Proxy {proxy.Host}] Navigation attempt {attempt} failed: {ex.Message}");
+                        Logger.Log($"[Proxy {proxy.Host}] Попытка навигации {attempt} провалена: {ex.Message}");
+                        if (ex.Message.Contains("net::ERR_TUNNEL_CONNECTION_FAILED"))
+                        {
+                            Logger.Log($"[Proxy {proxy.Host}] ОБНАРУЖЕНО: ERR_TUNNEL_CONNECTION_FAILED. Проблема с соединением через прокси.");
+                        }
                         if (attempt < 3) await Task.Delay(2000);
                     }
                 }
 
                 if (!navSuccess)
                 {
-                    Logger.Log($"[Proxy {proxy.Host}] Skipped due to persistent timeouts after 3 attempts.");
+                    Logger.Log($"[Proxy {proxy.Host}] Пропуск из-за постоянных ошибок навигации после 3 попыток.");
                     return null;
                 }
 
                 // Wait for Cloudflare challenge to pass
-                Logger.Log($"[Proxy {proxy.Host}] Waiting for Cloudflare challenge...");
+                Logger.Log($"[Proxy {proxy.Host}] Ожидание прохождения Cloudflare challenge...");
                 bool challengePassed = false;
                 for (int i = 0; i < 30; i++)
                 {
                     var title = await page.TitleAsync();
                     if (title.Contains("CS.MONEY") && !title.Contains("Just a moment"))
                     {
-                        Logger.Log($"[Proxy {proxy.Host}] Challenge passed! Title: {title}");
+                        Logger.Log($"[Proxy {proxy.Host}] Challenge пройден! Title: {title}");
                         challengePassed = true;
                         break;
                     }
+                    if (i % 5 == 0) Logger.Log($"[Proxy {proxy.Host}] Текущий заголовок страницы: {title}");
                     await Task.Delay(2000);
                 }
 
                 if (!challengePassed)
                 {
-                    Logger.Log($"[Proxy {proxy.Host}] Challenge NOT passed (timeout).");
+                    Logger.Log($"[Proxy {proxy.Host}] Challenge НЕ пройден (timeout).");
                 }
 
                 // Human Emulation
-                Logger.Log($"[Proxy {proxy.Host}] Performing human emulation...");
+                Logger.Log($"[Proxy {proxy.Host}] Выполнение эмуляции действий человека...");
                 var random = new Random();
                 await page.Mouse.MoveAsync(random.Next(100, 1000), random.Next(100, 600));
                 await Task.Delay(random.Next(200, 500));
@@ -127,14 +161,14 @@ namespace Probe4
                 await Task.Delay(1000);
 
                 // Hard Cookie Wait
-                Logger.Log($"[Proxy {proxy.Host}] Waiting for cf_clearance cookie...");
+                Logger.Log($"[Proxy {proxy.Host}] Ожидание куки cf_clearance...");
                 bool cookieFound = false;
                 for (int i = 0; i < 10; i++)
                 {
                     var currentCookies = await context.CookiesAsync();
                     if (currentCookies.Any(c => c.Name == "cf_clearance"))
                     {
-                        Logger.Log($"[Proxy {proxy.Host}] cf_clearance cookie found after {i + 1} seconds.");
+                        Logger.Log($"[Proxy {proxy.Host}] Кука cf_clearance найдена через {i + 1} сек.");
                         cookieFound = true;
                         break;
                     }
@@ -143,11 +177,11 @@ namespace Probe4
 
                 if (!cookieFound)
                 {
-                    Logger.Log($"[Proxy {proxy.Host}] WARNING: cf_clearance cookie NOT found after wait.");
+                    Logger.Log($"[Proxy {proxy.Host}] ПРЕДУПРЕЖДЕНИЕ: кука cf_clearance НЕ найдена после ожидания.");
                 }
 
                 // Session Warm-up: Wait for a successful API call
-                Logger.Log($"[Proxy {proxy.Host}] Waiting for session warm-up...");
+                Logger.Log($"[Proxy {proxy.Host}] Прогрев сессии (API warm-up)...");
 
                 var warmUpScript = @"
                     async () => {
@@ -160,39 +194,36 @@ namespace Probe4
                             'sec-fetch-mode': 'cors',
                             'sec-fetch-site': 'same-origin'
                         };
-                        console.log('Starting warm-up fetch test...');
+                        console.log('Начало проверочного fetch-запроса...');
                         for (let i = 0; i < 10; i++) {
                             try {
-                                console.log(`Attempt ${i + 1}: Fetching ${url}`);
+                                console.log(`Попытка ${i + 1}: Запрос ${url}`);
                                 const res = await fetch(url, { headers });
-                                console.log(`Attempt ${i + 1} Status: ${res.status} ${res.statusText}`);
+                                console.log(`Попытка ${i + 1} Статус: ${res.status} ${res.statusText}`);
                                 if (res.status === 200) {
-                                    console.log('Warm-up fetch SUCCESS!');
+                                    console.log('Warm-up fetch УСПЕШНО!');
                                     return true;
                                 }
                                 if (res.status === 403 || res.status === 401) {
                                     const text = await res.text();
-                                    console.error(`Attempt ${i + 1} Access Denied: ${text.substring(0, 200)}`);
+                                    console.error(`Попытка ${i + 1} Доступ запрещен (403/401): ${text.substring(0, 200)}`);
                                 }
                             } catch (e) {
-                                console.error(`Attempt ${i + 1} Exception: ${e.message}`);
+                                console.error(`Попытка ${i + 1} Исключение: ${e.message}`);
                             }
                             await new Promise(r => setTimeout(r, 2000));
                         }
-                        console.error('Warm-up fetch FAILED after 10 attempts.');
+                        console.error('Warm-up fetch ПРОВАЛЕН после 10 попыток.');
                         return false;
                     }
                 ";
 
                 bool warmedUp = await page.EvaluateAsync<bool>(warmUpScript);
-                Logger.Log($"[Proxy {proxy.Host}] Warm-up result: {warmedUp}");
+                Logger.Log($"[Proxy {proxy.Host}] Результат прогрева: {warmedUp}");
 
                 if (!warmedUp)
                 {
-                    Logger.Log($"[Proxy {proxy.Host}] Warm-up FAILED. Session might be invalid.");
-                    // According to requirements, failure in warm-up means we should return null or handle retry.
-                    // For now, we continue but the warning is logged. The user said:
-                    // "It should be considered a Failure if the warmUpScript fails, even if the cookie is present."
+                    Logger.Log($"[Proxy {proxy.Host}] Прогрев ПРОВАЛЕН. Сессия может быть невалидной.");
                     return null;
                 }
 
@@ -208,15 +239,15 @@ namespace Probe4
 
                 if (!cookies.Any(c => c.Name == "cf_clearance"))
                 {
-                    Logger.Log($"[Proxy {proxy.Host}] WARNING: cf_clearance cookie not found!");
+                    Logger.Log($"[Proxy {proxy.Host}] ПРЕДУПРЕЖДЕНИЕ: кука cf_clearance не найдена в итоговом списке!");
                 }
 
-                Logger.Log($"[Proxy {proxy.Host}] Session refreshed successfully.");
+                Logger.Log($"[Proxy {proxy.Host}] Сессия успешно обновлена.");
                 return session;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[Proxy {proxy.Host}] Failed to refresh session", ex);
+                Logger.LogError($"[Proxy {proxy.Host}] Ошибка при обновлении сессии", ex);
                 return null;
             }
             finally
@@ -225,10 +256,14 @@ namespace Probe4
                 {
                     if (Directory.Exists(userDataDir))
                     {
+                        Logger.Log($"[Proxy {proxy.Host}] Удаление временной директории: {userDataDir}");
                         Directory.Delete(userDataDir, true);
                     }
                 }
-                catch {}
+                catch (Exception ex)
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] Не удалось удалить директорию {userDataDir}: {ex.Message}");
+                }
             }
         }
     }
