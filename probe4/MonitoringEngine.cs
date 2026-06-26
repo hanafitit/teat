@@ -59,7 +59,7 @@ namespace Probe4
                 // HttpRequestMessage by default doesn't have them.
                 // We'll just make sure we don't add them.
 
-                var response = await proxy.Client.SendAsync(request);
+                var response = await proxy.Client!.SendAsync(request);
 
                 if (response.StatusCode == (HttpStatusCode)429)
                 {
