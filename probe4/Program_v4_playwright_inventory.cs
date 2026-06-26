@@ -1,9 +1,5 @@
-// CS.MONEY load_bots_inventory probe v4 — Playwright + Promise.all + прокси
-//
-// Использование:
-//   dotnet run -- <интервал_мс> <прокси_url>
-// Пример:
-//   dotnet run -- 500 "http://user:pass@p.webshare.io:80"
+// CS.MONEY load_bots_inventory probe v4.1 — 10x10 Proxy Scheme
+// 100 requests in <1s using 10 proxies
 
 using System;
 using System.IO;
@@ -12,6 +8,8 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Linq;
+using System.Diagnostics;
 using Microsoft.Playwright;
 
 class Program
@@ -40,220 +38,181 @@ class Program
         "AWP | Dragon Lore", "AWP | Medusa", "AWP | Asiimov", "AK-47 | Wild Lotus", "AK-47 | Gold Arabesque",
     };
 
+    static readonly (string ip, int port)[] ProxyList = new[]
+    {
+        ("31.59.20.176", 6754),
+        ("31.56.127.193", 7684),
+        ("45.38.107.97", 6014),
+        ("38.154.203.95", 5863),
+        ("198.105.121.200", 6462),
+        ("64.137.96.74", 6641),
+        ("198.23.243.226", 6361),
+        ("38.154.185.97", 6370),
+        ("142.111.67.146", 5611),
+        ("191.96.254.138", 6185),
+    };
+
+    const string ProxyUser = "ycmhblvu";
+    const string ProxyPass = "htols81cakkl";
+
     static async Task Main(string[] args)
     {
-        int intervalMs = 500;
-        string? proxyUrl = null;
-        int maxParallel = 5;
-        int batchDelayMs = 100;
-        int startupDelayMs = 3000;
-        int cooldownOn429 = 0;
-
-        if (args.Length >= 1) intervalMs = int.Parse(args[0]);
-        if (args.Length >= 2) proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
-        if (args.Length >= 3) maxParallel = Math.Max(1, int.Parse(args[2]));
-        if (args.Length >= 4) batchDelayMs = int.Parse(args[3]);
-        if (args.Length >= 5) startupDelayMs = int.Parse(args[4]);
-        if (args.Length >= 6) cooldownOn429 = int.Parse(args[5]);
-
-        // Парсим user:pass из URL если есть
-        string? proxyUser = null, proxyPass = null, proxyServer = null;
-        if (proxyUrl != null)
-        {
-            var uri = new Uri(proxyUrl);
-            proxyServer = $"{uri.Scheme}://{uri.Host}:{uri.Port}";
-            if (!string.IsNullOrEmpty(uri.UserInfo))
-            {
-                var parts = uri.UserInfo.Split(':', 2);
-                proxyUser = Uri.UnescapeDataString(parts[0]);
-                proxyPass = parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : null;
-            }
-        }
-
-        Console.WriteLine($"Probe v4 Load Test — {SkinNames.Length} скинов, maxParallel={maxParallel}, batchDelay={batchDelayMs}мс, startupDelay={startupDelayMs}мс, interval={intervalMs}мс, cooldownOn429={cooldownOn429}");
-        if (proxyUrl != null) Console.WriteLine($"Прокси: {proxyServer} user={proxyUser}");
-
+        Console.WriteLine("Запуск схемы 10x10...");
         using var playwright = await Playwright.CreateAsync();
 
-        // Прокси нужен и на уровне Launch, и на уровне Context
         var launchOptions = new BrowserTypeLaunchOptions
         {
-            Headless = false,
-            Args = new[] { "--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled" }
+            Headless = true,
+            Args = new[] {
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-gpu",
+                "--disable-dev-shm-usage"
+            }
         };
-        if (proxyServer != null)
-            launchOptions.Proxy = new Proxy { Server = proxyServer, Username = proxyUser, Password = proxyPass };
 
         await using var browser = await playwright.Chromium.LaunchAsync(launchOptions);
 
-        var contextOptions = new BrowserNewContextOptions
+        var contexts = new IBrowserContext[ProxyList.Length];
+        var pages = new IPage[ProxyList.Length];
+        var skinGroups = new string[ProxyList.Length][];
+
+        Console.WriteLine("Создание 10 контекстов с прокси...");
+
+        for (int i = 0; i < ProxyList.Length; i++)
         {
-            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            ViewportSize = new ViewportSize { Width = 1280, Height = 800 },
-            Locale = "ru-RU",
-        };
-        if (proxyServer != null)
-            contextOptions.Proxy = new Proxy { Server = proxyServer, Username = proxyUser, Password = proxyPass };
-
-        var context = await browser.NewContextAsync(contextOptions);
-
-        await context.AddInitScriptAsync(@"
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
-            delete navigator.__proto__.webdriver;
-            window.chrome = { runtime: {} };
-        ");
-
-        var page = await context.NewPageAsync();
-
-        Console.WriteLine("Загружаем cs.money...");
-        try
-        {
-            await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
+            var proxy = ProxyList[i];
+            var contextOptions = new BrowserNewContextOptions
             {
-                Timeout = 60_000,
-                WaitUntil = WaitUntilState.NetworkIdle
-            });
+                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                Proxy = new Proxy { Server = $"http://{proxy.ip}:{proxy.port}", Username = ProxyUser, Password = ProxyPass },
+                ViewportSize = new ViewportSize { Width = 800, Height = 600 },
+                HttpCredentials = new HttpCredentials { Username = ProxyUser, Password = ProxyPass }
+            };
+            contexts[i] = await browser.NewContextAsync(contextOptions);
+
+            await contexts[i].AddInitScriptAsync(@"
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+                delete navigator.__proto__.webdriver;
+                window.chrome = { runtime: {} };
+            ");
+
+            pages[i] = await contexts[i].NewPageAsync();
+            skinGroups[i] = SkinNames.Skip(i * 10).Take(10).ToArray();
         }
-        catch (Exception ex) { Console.WriteLine($"Предупреждение: {ex.Message}"); }
 
-        await Task.Delay(startupDelayMs);
-        Console.WriteLine("Страница загружена. Начинаем параллельный опрос...\n");
+        Console.WriteLine("Переход на cs.money для инициализации сессий...");
+        for (int i = 0; i < pages.Length; i++)
+        {
+            try
+            {
+                Console.WriteLine($"Загрузка страницы {i}...");
+                await pages[i].GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 60000 });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка при загрузке страницы {i}: {ex.Message}");
+            }
+        }
 
-        string logPath = "inventory_probe_log_v4.csv";
-        bool isNew = !File.Exists(logPath);
-        using var log = new StreamWriter(logPath, append: true);
-        if (isNew) { log.WriteLine("local_time_iso,cycle_ms,ok_count,blocked_count,error_count,changed_skins"); log.Flush(); }
+        Console.WriteLine("Готовность 100%. Начинаем опрос.\n");
 
-        var lastHashes = new Dictionary<string, string>();
         int cycleCount = 0;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-
-        string loadTestLogPath = "load_test.csv";
-        bool isLoadTestNew = !File.Exists(loadTestLogPath);
-        using var loadTestLog = new StreamWriter(loadTestLogPath, append: true);
-        if (isLoadTestNew) { loadTestLog.WriteLine("timestamp,parallel,batch_delay,cycle_ms,success,blocked,errors,cooldown"); loadTestLog.Flush(); }
-
-        Console.CancelKeyPress += (s, e) => Console.WriteLine($"\n--- Остановлено после {cycleCount} циклов ---");
+        var sw = Stopwatch.StartNew();
 
         while (true)
         {
             cycleCount++;
-            var t0 = sw.ElapsedMilliseconds;
-            var results = new List<SkinResult>();
+            var cycleT0 = sw.ElapsedMilliseconds;
 
-            // Разбиваем на батчи
-            for (int i = 0; i < SkinNames.Length; i += maxParallel)
+            var cycleTasks = new Task<string>[ProxyList.Length];
+            for (int i = 0; i < ProxyList.Length; i++)
             {
-                var batch = SkinNames[i..Math.Min(i + maxParallel, SkinNames.Length)];
-                string namesJson = JsonSerializer.Serialize(batch);
-
+                int index = i;
+                string namesJson = JsonSerializer.Serialize(skinGroups[index]);
                 string script = $@"
 async () => {{
     const names = {namesJson};
+    const cycleIndex = {cycleCount};
     const results = await Promise.all(names.map(async (name) => {{
         const encoded = encodeURIComponent(name);
         const url = `/5.0/load_bots_inventory/730?limit=60&offset=0&order=asc&sort=price&name=${{encoded}}`;
         const start = performance.now();
         try {{
             const res = await fetch(url, {{
-                credentials: 'include',
-                headers: {{ 'Accept': 'application/json, text/plain, */*', 'X-Client-App': 'web_mobile', 'X-Kl-Ajax-Request': 'Ajax_Request' }}
+                headers: {{
+                    'Accept': 'application/json, text/plain, */*',
+                    'X-Client-App': 'web_mobile',
+                    'X-Kl-Ajax-Request': 'Ajax_Request'
+                }}
             }});
             const body = await res.text();
             const end = performance.now();
-            return {{ name, status: res.status, body, duration: end - start }};
+            return {{ name, status: res.status, bodyLength: body.length, duration: end - start }};
         }} catch(e) {{
             const end = performance.now();
-            return {{ name, status: -2, body: '', error: e.message, duration: end - start }};
+            return {{ name, status: -2, bodyLength: 0, error: e.message, duration: end - start }};
         }}
     }}));
     return JSON.stringify(results);
 }}";
-                try
-                {
-                    var raw = await page.EvaluateAsync<string>(script);
-                    var batchResults = JsonSerializer.Deserialize<List<SkinResult>>(raw ?? "[]") ?? new();
-                    results.AddRange(batchResults);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($" Ошибка в батче {i / maxParallel + 1}: {ex.Message}");
-                }
-
-                if (i + maxParallel < SkinNames.Length)
-                {
-                    await Task.Delay(batchDelayMs);
-                }
+                cycleTasks[i] = pages[i].EvaluateAsync<string>(script);
             }
 
-            long cycleMs = sw.ElapsedMilliseconds - t0;
-            int okCount = 0, blockedCount = 0, errorCount = 0;
-            double totalRequestMs = 0;
-            var changedSkins = new List<string>();
-
-            foreach (var r in results)
+            string[] allRawResults;
+            try
             {
-                totalRequestMs += r.Duration;
-                if (r.Status == 200)
-                {
-                    okCount++;
-                    string hash = ComputeHash(r.Body ?? "");
-                    if (lastHashes.TryGetValue(r.Name, out var prev) && prev != hash) changedSkins.Add(r.Name);
-                    lastHashes[r.Name] = hash;
-                }
-                else if (r.Status == 429) blockedCount++;
-                else errorCount++;
+                allRawResults = await Task.WhenAll(cycleTasks);
             }
-
-            double avgRequestMs = results.Count > 0 ? totalRequestMs / results.Count : 0;
-            double blockedRate = results.Count > 0 ? (double)blockedCount / results.Count : 0;
-            int cooldownTriggered = (cooldownOn429 == 1 && blockedRate >= 0.30) ? 1 : 0;
-
-            Console.WriteLine($"[CYCLE {cycleCount}]");
-            Console.WriteLine($"parallel={maxParallel}");
-            Console.WriteLine($"batch_delay={batchDelayMs}ms");
-            Console.WriteLine($"startup_delay={startupDelayMs}ms");
-            Console.WriteLine($"duration={cycleMs}ms");
-            Console.WriteLine($"total_requests={results.Count}");
-            Console.WriteLine($"success={okCount}");
-            Console.WriteLine($"blocked={blockedCount}");
-            Console.WriteLine($"blocked_rate={blockedRate:F2}");
-            Console.WriteLine($"errors={errorCount}");
-            Console.WriteLine($"avg={avgRequestMs:F0}ms");
-            Console.WriteLine($"cooldown={(cooldownTriggered == 1 ? "YES" : "no")}");
-            if (changedSkins.Count > 0) Console.WriteLine($"changed={string.Join(", ", changedSkins)}");
-            Console.WriteLine();
-
-            if (cooldownTriggered == 1)
+            catch (Exception ex)
             {
-                Console.WriteLine("[COOLDOWN CANDIDATE]");
-                Console.WriteLine("blocked_rate threshold reached.");
+                Console.WriteLine($"[Цикл {cycleCount}] Ошибка выполнения батчей: {ex.Message}");
+                break;
             }
 
-            log.WriteLine($"{DateTime.Now:O},{cycleMs},{okCount},{blockedCount},{errorCount},{string.Join(";", changedSkins).Replace(',', '|')}");
-            log.Flush();
+            long cycleDuration = sw.ElapsedMilliseconds - cycleT0;
 
-            loadTestLog.WriteLine($"{DateTime.Now:O},{maxParallel},{batchDelayMs},{cycleMs},{okCount},{blockedCount},{errorCount},{cooldownTriggered}");
-            loadTestLog.Flush();
+            int okCount = 0;
+            int blockedCount = 0;
+            int errorCount = 0;
+            bool stopEverything = false;
 
-            long elapsed = sw.ElapsedMilliseconds - t0;
-            int delay = Math.Max(0, intervalMs - (int)elapsed);
-            if (delay > 0) await Task.Delay(delay);
+            foreach (var raw in allRawResults)
+            {
+                var batchResults = JsonSerializer.Deserialize<List<SkinResult>>(raw) ?? new();
+                foreach (var r in batchResults)
+                {
+                    if (r.Status == 200) okCount++;
+                    else if (r.Status == 429) { blockedCount++; stopEverything = true; }
+                    else if (r.Status == 403) { errorCount++; stopEverything = true; }
+                    else { errorCount++; }
+                }
+            }
+
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Цикл {cycleCount} | Время: {cycleDuration}мс | OK: {okCount} | 429: {blockedCount} | 403+: {errorCount}");
+
+            if (stopEverything)
+            {
+                Console.WriteLine("\n!!! ОБНАРУЖЕНА БЛОКИРОВКА (403/429). ОСТАНОВКА ЦИКЛА !!!");
+                break;
+            }
+
+            // Условие задачи: <1с. Если работаем быстрее, задержка не нужна (по желанию пользователя).
+            // Но чтобы не спамить бесконечно быстро и не перегружать CPU, можно добавить микро-паузу,
+            // если пользователь не против. Однако он сказал "нет" на вопрос о ожидании интервала.
+            // Поэтому идем на следующий круг сразу.
         }
-    }
 
-    static string ComputeHash(string input)
-    {
-        using var md5 = MD5.Create();
-        return Convert.ToHexString(md5.ComputeHash(Encoding.UTF8.GetBytes(input)));
+        Console.WriteLine("Завершение работы...");
+        await browser.CloseAsync();
     }
 }
 
 class SkinResult
 {
     [System.Text.Json.Serialization.JsonPropertyName("name")] public string Name { get; set; } = "";
-    [System.Text.Json.Serialization.JsonPropertyName("status")] public int Status { get; set; }
-    [System.Text.Json.Serialization.JsonPropertyName("body")] public string? Body { get; set; }
-    [System.Text.Json.Serialization.JsonPropertyName("error")] public string? Error { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("status")] public long Status { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("bodyLength")] public int BodyLength { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("duration")] public double Duration { get; set; }
 }
