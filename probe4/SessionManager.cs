@@ -22,9 +22,7 @@ namespace Probe4
                 {
                     Headless = true,
                     Proxy = new Proxy {
-                        Server = $"http://{proxy.Host}:{proxy.Port}",
-                        Username = proxy.Username,
-                        Password = proxy.Password
+                        Server = $"http://{proxy.Host}:{proxy.Port}"
                     },
                     UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 },
@@ -37,6 +35,15 @@ namespace Probe4
                         "--disable-dev-shm-usage"
                     }
                 };
+
+                if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
+                {
+                    persistentOptions.HttpCredentials = new HttpCredentials
+                    {
+                        Username = proxy.Username,
+                        Password = proxy.Password
+                    };
+                }
 
                 await using var context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
 
