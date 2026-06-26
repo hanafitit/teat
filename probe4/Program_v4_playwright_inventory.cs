@@ -46,26 +46,15 @@ class Program
         string? proxyUrl = null;
         int maxParallel = 5;
         int batchDelayMs = 100;
+        int startupDelayMs = 3000;
+        int cooldownOn429 = 0;
 
-        if (args.Length == 1)
-        {
-            intervalMs = int.Parse(args[0]);
-        }
-        else if (args.Length >= 3)
-        {
-            intervalMs = int.Parse(args[0]);
-            proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
-            maxParallel = Math.Max(1, int.Parse(args[2]));
-            if (args.Length >= 4)
-            {
-                batchDelayMs = int.Parse(args[3]);
-            }
-        }
-        else if (args.Length == 2)
-        {
-            intervalMs = int.Parse(args[0]);
-            proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
-        }
+        if (args.Length >= 1) intervalMs = int.Parse(args[0]);
+        if (args.Length >= 2) proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
+        if (args.Length >= 3) maxParallel = Math.Max(1, int.Parse(args[2]));
+        if (args.Length >= 4) batchDelayMs = int.Parse(args[3]);
+        if (args.Length >= 5) startupDelayMs = int.Parse(args[4]);
+        if (args.Length >= 6) cooldownOn429 = int.Parse(args[5]);
 
         // Парсим user:pass из URL если есть
         string? proxyUser = null, proxyPass = null, proxyServer = null;
@@ -81,7 +70,7 @@ class Program
             }
         }
 
-        Console.WriteLine($"Probe v4 Load Test — {SkinNames.Length} скинов, maxParallel={maxParallel}, batchDelay={batchDelayMs}мс, интервал={intervalMs}мс");
+        Console.WriteLine($"Probe v4 Load Test — {SkinNames.Length} скинов, maxParallel={maxParallel}, batchDelay={batchDelayMs}мс, startupDelay={startupDelayMs}мс, interval={intervalMs}мс, cooldownOn429={cooldownOn429}");
         if (proxyUrl != null) Console.WriteLine($"Прокси: {proxyServer} user={proxyUser}");
 
         using var playwright = await Playwright.CreateAsync();
@@ -127,7 +116,7 @@ class Program
         }
         catch (Exception ex) { Console.WriteLine($"Предупреждение: {ex.Message}"); }
 
-        await Task.Delay(3000);
+        await Task.Delay(startupDelayMs);
         Console.WriteLine("Страница загружена. Начинаем параллельный опрос...\n");
 
         string logPath = "inventory_probe_log_v4.csv";
@@ -142,7 +131,7 @@ class Program
         string loadTestLogPath = "load_test.csv";
         bool isLoadTestNew = !File.Exists(loadTestLogPath);
         using var loadTestLog = new StreamWriter(loadTestLogPath, append: true);
-        if (isLoadTestNew) { loadTestLog.WriteLine("timestamp,parallel,batch_delay,cycle_ms,success,blocked,errors"); loadTestLog.Flush(); }
+        if (isLoadTestNew) { loadTestLog.WriteLine("timestamp,parallel,batch_delay,cycle_ms,success,blocked,errors,cooldown"); loadTestLog.Flush(); }
 
         Console.CancelKeyPress += (s, e) => Console.WriteLine($"\n--- Остановлено после {cycleCount} циклов ---");
 
@@ -212,32 +201,39 @@ async () => {{
                     if (lastHashes.TryGetValue(r.Name, out var prev) && prev != hash) changedSkins.Add(r.Name);
                     lastHashes[r.Name] = hash;
                 }
-                else if (r.Status == 403 || r.Status == 429) blockedCount++;
+                else if (r.Status == 429) blockedCount++;
                 else errorCount++;
             }
 
             double avgRequestMs = results.Count > 0 ? totalRequestMs / results.Count : 0;
-
-            string changedStr = changedSkins.Count > 0 ? $" | ИЗМЕНИЛИСЬ: {string.Join(", ", changedSkins)}" : "";
+            double blockedRate = results.Count > 0 ? (double)blockedCount / results.Count : 0;
+            int cooldownTriggered = (cooldownOn429 == 1 && blockedRate >= 0.30) ? 1 : 0;
 
             Console.WriteLine($"[CYCLE {cycleCount}]");
             Console.WriteLine($"parallel={maxParallel}");
             Console.WriteLine($"batch_delay={batchDelayMs}ms");
+            Console.WriteLine($"startup_delay={startupDelayMs}ms");
             Console.WriteLine($"duration={cycleMs}ms");
             Console.WriteLine($"total_requests={results.Count}");
             Console.WriteLine($"success={okCount}");
             Console.WriteLine($"blocked={blockedCount}");
+            Console.WriteLine($"blocked_rate={blockedRate:F2}");
             Console.WriteLine($"errors={errorCount}");
             Console.WriteLine($"avg={avgRequestMs:F0}ms");
+            Console.WriteLine($"cooldown={(cooldownTriggered == 1 ? "YES" : "no")}");
             if (changedSkins.Count > 0) Console.WriteLine($"changed={string.Join(", ", changedSkins)}");
             Console.WriteLine();
 
-            if (blockedCount > SkinNames.Length * 0.2) Console.WriteLine($"  ⚠ Много блоков ({blockedCount}/{SkinNames.Length})!");
+            if (cooldownTriggered == 1)
+            {
+                Console.WriteLine("[COOLDOWN CANDIDATE]");
+                Console.WriteLine("blocked_rate threshold reached.");
+            }
 
             log.WriteLine($"{DateTime.Now:O},{cycleMs},{okCount},{blockedCount},{errorCount},{string.Join(";", changedSkins).Replace(',', '|')}");
             log.Flush();
 
-            loadTestLog.WriteLine($"{DateTime.Now:O},{maxParallel},{batchDelayMs},{cycleMs},{okCount},{blockedCount},{errorCount}");
+            loadTestLog.WriteLine($"{DateTime.Now:O},{maxParallel},{batchDelayMs},{cycleMs},{okCount},{blockedCount},{errorCount},{cooldownTriggered}");
             loadTestLog.Flush();
 
             long elapsed = sw.ElapsedMilliseconds - t0;
