@@ -114,7 +114,8 @@ namespace Probe4
 
                     cycleTasks.Add(Task.Run(async () => {
                         var tasks = proxyItems.Select(item => MonitoringEngine.FetchSkinAsync(proxy, item, session!)).ToList();
-                        return await Task.WhenAll(tasks);
+                        var results = await Task.WhenAll(tasks);
+                        return results;
                     }));
                 }
 
