@@ -55,6 +55,12 @@ namespace Probe4
 
                 var page = await context.NewPageAsync();
 
+                // Pipe browser console logs to C# console
+                page.Console += (_, e) => {
+                    var color = e.Type == "error" ? "RED" : "YELLOW";
+                    Logger.Log($"[Browser {e.Type.ToUpper()}] [Proxy {proxy.Host}]: {e.Text}");
+                };
+
                 Logger.Log($"[Proxy {proxy.Host}] Navigating to cs.money...");
                 IResponse? response = null;
                 bool navSuccess = false;
@@ -153,13 +159,26 @@ namespace Probe4
                             'sec-fetch-mode': 'cors',
                             'sec-fetch-site': 'same-origin'
                         };
+                        console.log('Starting warm-up fetch test...');
                         for (let i = 0; i < 10; i++) {
                             try {
+                                console.log(`Attempt ${i + 1}: Fetching ${url}`);
                                 const res = await fetch(url, { headers });
-                                if (res.status === 200) return true;
-                            } catch (e) {}
+                                console.log(`Attempt ${i + 1} Status: ${res.status} ${res.statusText}`);
+                                if (res.status === 200) {
+                                    console.log('Warm-up fetch SUCCESS!');
+                                    return true;
+                                }
+                                if (res.status === 403 || res.status === 401) {
+                                    const text = await res.text();
+                                    console.error(`Attempt ${i + 1} Access Denied: ${text.substring(0, 200)}`);
+                                }
+                            } catch (e) {
+                                console.error(`Attempt ${i + 1} Exception: ${e.message}`);
+                            }
                             await new Promise(r => setTimeout(r, 2000));
                         }
+                        console.error('Warm-up fetch FAILED after 10 attempts.');
                         return false;
                     }
                 ";
