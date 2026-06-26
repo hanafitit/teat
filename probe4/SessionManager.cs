@@ -56,11 +56,32 @@ namespace Probe4
                 var page = await context.NewPageAsync();
 
                 Logger.Log($"[Proxy {proxy.Host}] Navigating to cs.money...");
-                var response = await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
+                IResponse? response = null;
+                bool navSuccess = false;
+                for (int attempt = 1; attempt <= 3; attempt++)
                 {
-                    WaitUntil = WaitUntilState.NetworkIdle,
-                    Timeout = 90000
-                });
+                    try
+                    {
+                        response = await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
+                        {
+                            WaitUntil = WaitUntilState.DOMContentLoaded,
+                            Timeout = 45000
+                        });
+                        navSuccess = true;
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"[Proxy {proxy.Host}] Navigation attempt {attempt} failed: {ex.Message}");
+                        if (attempt < 3) await Task.Delay(2000);
+                    }
+                }
+
+                if (!navSuccess)
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] Skipped due to persistent timeouts after 3 attempts.");
+                    return null;
+                }
 
                 // Wait for Cloudflare challenge to pass
                 Logger.Log($"[Proxy {proxy.Host}] Waiting for Cloudflare challenge...");
