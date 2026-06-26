@@ -1,0 +1,6 @@
+*
+!probe4/
+probe4/*
+!probe4/.gitignore
+!probe4/*.cs
+!probe4/*.csproj
