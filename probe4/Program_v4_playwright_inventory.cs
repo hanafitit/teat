@@ -45,7 +45,7 @@ class Program
         int intervalMs = 500;
         string? proxyUrl = null;
         int maxParallel = 5;
-        const int batchDelayMs = 100;
+        int batchDelayMs = 100;
 
         if (args.Length == 1)
         {
@@ -56,6 +56,10 @@ class Program
             intervalMs = int.Parse(args[0]);
             proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
             maxParallel = Math.Max(1, int.Parse(args[2]));
+            if (args.Length >= 4)
+            {
+                batchDelayMs = int.Parse(args[3]);
+            }
         }
         else if (args.Length == 2)
         {
@@ -138,7 +142,7 @@ class Program
         string loadTestLogPath = "load_test.csv";
         bool isLoadTestNew = !File.Exists(loadTestLogPath);
         using var loadTestLog = new StreamWriter(loadTestLogPath, append: true);
-        if (isLoadTestNew) { loadTestLog.WriteLine("timestamp,parallel,cycle_ms,success,blocked,errors"); loadTestLog.Flush(); }
+        if (isLoadTestNew) { loadTestLog.WriteLine("timestamp,parallel,batch_delay,cycle_ms,success,blocked,errors"); loadTestLog.Flush(); }
 
         Console.CancelKeyPress += (s, e) => Console.WriteLine($"\n--- Остановлено после {cycleCount} циклов ---");
 
@@ -218,6 +222,7 @@ async () => {{
 
             Console.WriteLine($"[CYCLE {cycleCount}]");
             Console.WriteLine($"parallel={maxParallel}");
+            Console.WriteLine($"batch_delay={batchDelayMs}ms");
             Console.WriteLine($"duration={cycleMs}ms");
             Console.WriteLine($"total_requests={results.Count}");
             Console.WriteLine($"success={okCount}");
@@ -232,7 +237,7 @@ async () => {{
             log.WriteLine($"{DateTime.Now:O},{cycleMs},{okCount},{blockedCount},{errorCount},{string.Join(";", changedSkins).Replace(',', '|')}");
             log.Flush();
 
-            loadTestLog.WriteLine($"{DateTime.Now:O},{maxParallel},{cycleMs},{okCount},{blockedCount},{errorCount}");
+            loadTestLog.WriteLine($"{DateTime.Now:O},{maxParallel},{batchDelayMs},{cycleMs},{okCount},{blockedCount},{errorCount}");
             loadTestLog.Flush();
 
             long elapsed = sw.ElapsedMilliseconds - t0;
