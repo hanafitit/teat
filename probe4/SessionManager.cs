@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
@@ -12,26 +13,14 @@ namespace Probe4
         public static async Task<SessionData?> RefreshSessionAsync(ProxyInfo proxy)
         {
             Logger.Log($"Refreshing session using proxy {proxy.Host}...");
+            string userDataDir = Path.Combine(Path.GetTempPath(), "playwright_profile_" + Guid.NewGuid().ToString());
             try
             {
                 using var playwright = await Playwright.CreateAsync();
-                var launchOptions = new BrowserTypeLaunchOptions
+
+                var persistentOptions = new BrowserTypeLaunchPersistentContextOptions
                 {
                     Headless = true,
-                    Proxy = new Proxy { Server = "http://per-context" },
-                    Args = new[] {
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-gpu",
-                        "--disable-dev-shm-usage"
-                    }
-                };
-
-                await using var browser = await playwright.Chromium.LaunchAsync(launchOptions);
-                var contextOptions = new BrowserNewContextOptions
-                {
-                    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     Proxy = new Proxy {
                         Server = $"http://{proxy.Host}:{proxy.Port}",
                         Username = proxy.Username,
@@ -41,10 +30,18 @@ namespace Probe4
                         Username = proxy.Username,
                         Password = proxy.Password
                     },
-                    ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
+                    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                    ViewportSize = new ViewportSize { Width = 1280, Height = 720 },
+                    Args = new[] {
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-gpu",
+                        "--disable-dev-shm-usage"
+                    }
                 };
 
-                var context = await browser.NewContextAsync(contextOptions);
+                await using var context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
 
                 // Stealth scripts
                 await context.AddInitScriptAsync(@"
@@ -217,6 +214,17 @@ namespace Probe4
             {
                 Logger.LogError($"[Proxy {proxy.Host}] Failed to refresh session", ex);
                 return null;
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(userDataDir))
+                    {
+                        Directory.Delete(userDataDir, true);
+                    }
+                }
+                catch {}
             }
         }
     }
