@@ -42,8 +42,26 @@ class Program
 
     static async Task Main(string[] args)
     {
-        int intervalMs = args.Length > 0 ? int.Parse(args[0]) : 500;
-        string? proxyUrl = args.Length > 1 ? args[1] : null;
+        int intervalMs = 500;
+        string? proxyUrl = null;
+        int maxParallel = 5;
+        const int batchDelayMs = 100;
+
+        if (args.Length == 1)
+        {
+            intervalMs = int.Parse(args[0]);
+        }
+        else if (args.Length >= 3)
+        {
+            intervalMs = int.Parse(args[0]);
+            proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
+            maxParallel = Math.Max(1, int.Parse(args[2]));
+        }
+        else if (args.Length == 2)
+        {
+            intervalMs = int.Parse(args[0]);
+            proxyUrl = args[1].Equals("none", StringComparison.OrdinalIgnoreCase) ? null : args[1];
+        }
 
         // Парсим user:pass из URL если есть
         string? proxyUser = null, proxyPass = null, proxyServer = null;
@@ -59,7 +77,7 @@ class Program
             }
         }
 
-        Console.WriteLine($"Probe v4 Promise.all — {SkinNames.Length} скинов параллельно, интервал={intervalMs}мс");
+        Console.WriteLine($"Probe v4 Load Test — {SkinNames.Length} скинов, maxParallel={maxParallel}, batchDelay={batchDelayMs}мс, интервал={intervalMs}мс");
         if (proxyUrl != null) Console.WriteLine($"Прокси: {proxyServer} user={proxyUser}");
 
         using var playwright = await Playwright.CreateAsync();
@@ -117,63 +135,105 @@ class Program
         int cycleCount = 0;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
+        string loadTestLogPath = "load_test.csv";
+        bool isLoadTestNew = !File.Exists(loadTestLogPath);
+        using var loadTestLog = new StreamWriter(loadTestLogPath, append: true);
+        if (isLoadTestNew) { loadTestLog.WriteLine("timestamp,parallel,cycle_ms,success,blocked,errors"); loadTestLog.Flush(); }
+
         Console.CancelKeyPress += (s, e) => Console.WriteLine($"\n--- Остановлено после {cycleCount} циклов ---");
 
         while (true)
         {
             cycleCount++;
             var t0 = sw.ElapsedMilliseconds;
-            string namesJson = JsonSerializer.Serialize(SkinNames);
-            string script = $@"
+            var results = new List<SkinResult>();
+
+            // Разбиваем на батчи
+            for (int i = 0; i < SkinNames.Length; i += maxParallel)
+            {
+                var batch = SkinNames[i..Math.Min(i + maxParallel, SkinNames.Length)];
+                string namesJson = JsonSerializer.Serialize(batch);
+
+                string script = $@"
 async () => {{
     const names = {namesJson};
     const results = await Promise.all(names.map(async (name) => {{
         const encoded = encodeURIComponent(name);
         const url = `/5.0/load_bots_inventory/730?limit=60&offset=0&order=asc&sort=price&name=${{encoded}}`;
+        const start = performance.now();
         try {{
             const res = await fetch(url, {{
                 credentials: 'include',
                 headers: {{ 'Accept': 'application/json, text/plain, */*', 'X-Client-App': 'web_mobile', 'X-Kl-Ajax-Request': 'Ajax_Request' }}
             }});
             const body = await res.text();
-            return {{ name, status: res.status, body }};
+            const end = performance.now();
+            return {{ name, status: res.status, body, duration: end - start }};
         }} catch(e) {{
-            return {{ name, status: -2, body: '', error: e.message }};
+            const end = performance.now();
+            return {{ name, status: -2, body: '', error: e.message, duration: end - start }};
         }}
     }}));
     return JSON.stringify(results);
 }}";
-
-            try
-            {
-                var raw = await page.EvaluateAsync<string>(script);
-                long cycleMs = sw.ElapsedMilliseconds - t0;
-                var results = JsonSerializer.Deserialize<List<SkinResult>>(raw ?? "[]") ?? new();
-
-                int okCount = 0, blockedCount = 0, errorCount = 0;
-                var changedSkins = new List<string>();
-
-                foreach (var r in results)
+                try
                 {
-                    if (r.Status == 200)
-                    {
-                        okCount++;
-                        string hash = ComputeHash(r.Body ?? "");
-                        if (lastHashes.TryGetValue(r.Name, out var prev) && prev != hash) changedSkins.Add(r.Name);
-                        lastHashes[r.Name] = hash;
-                    }
-                    else if (r.Status == 403 || r.Status == 429) blockedCount++;
-                    else errorCount++;
+                    var raw = await page.EvaluateAsync<string>(script);
+                    var batchResults = JsonSerializer.Deserialize<List<SkinResult>>(raw ?? "[]") ?? new();
+                    results.AddRange(batchResults);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($" Ошибка в батче {i / maxParallel + 1}: {ex.Message}");
                 }
 
-                string changedStr = changedSkins.Count > 0 ? $" | ИЗМЕНИЛИСЬ: {string.Join(", ", changedSkins)}" : "";
-                Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Цикл #{cycleCount} — {cycleMs}мс | OK:{okCount} БЛОК:{blockedCount} ERR:{errorCount}{changedStr}");
-                if (blockedCount > SkinNames.Length * 0.2) Console.WriteLine($"  ⚠ Много блоков ({blockedCount}/{SkinNames.Length})!");
-
-                log.WriteLine($"{DateTime.Now:O},{cycleMs},{okCount},{blockedCount},{errorCount},{string.Join(";", changedSkins).Replace(',', '|')}");
-                log.Flush();
+                if (i + maxParallel < SkinNames.Length)
+                {
+                    await Task.Delay(batchDelayMs);
+                }
             }
-            catch (Exception ex) { Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Ошибка цикла: {ex.Message}"); }
+
+            long cycleMs = sw.ElapsedMilliseconds - t0;
+            int okCount = 0, blockedCount = 0, errorCount = 0;
+            double totalRequestMs = 0;
+            var changedSkins = new List<string>();
+
+            foreach (var r in results)
+            {
+                totalRequestMs += r.Duration;
+                if (r.Status == 200)
+                {
+                    okCount++;
+                    string hash = ComputeHash(r.Body ?? "");
+                    if (lastHashes.TryGetValue(r.Name, out var prev) && prev != hash) changedSkins.Add(r.Name);
+                    lastHashes[r.Name] = hash;
+                }
+                else if (r.Status == 403 || r.Status == 429) blockedCount++;
+                else errorCount++;
+            }
+
+            double avgRequestMs = results.Count > 0 ? totalRequestMs / results.Count : 0;
+
+            string changedStr = changedSkins.Count > 0 ? $" | ИЗМЕНИЛИСЬ: {string.Join(", ", changedSkins)}" : "";
+
+            Console.WriteLine($"[CYCLE {cycleCount}]");
+            Console.WriteLine($"parallel={maxParallel}");
+            Console.WriteLine($"duration={cycleMs}ms");
+            Console.WriteLine($"total_requests={results.Count}");
+            Console.WriteLine($"success={okCount}");
+            Console.WriteLine($"blocked={blockedCount}");
+            Console.WriteLine($"errors={errorCount}");
+            Console.WriteLine($"avg={avgRequestMs:F0}ms");
+            if (changedSkins.Count > 0) Console.WriteLine($"changed={string.Join(", ", changedSkins)}");
+            Console.WriteLine();
+
+            if (blockedCount > SkinNames.Length * 0.2) Console.WriteLine($"  ⚠ Много блоков ({blockedCount}/{SkinNames.Length})!");
+
+            log.WriteLine($"{DateTime.Now:O},{cycleMs},{okCount},{blockedCount},{errorCount},{string.Join(";", changedSkins).Replace(',', '|')}");
+            log.Flush();
+
+            loadTestLog.WriteLine($"{DateTime.Now:O},{maxParallel},{cycleMs},{okCount},{blockedCount},{errorCount}");
+            loadTestLog.Flush();
 
             long elapsed = sw.ElapsedMilliseconds - t0;
             int delay = Math.Max(0, intervalMs - (int)elapsed);
@@ -194,4 +254,5 @@ class SkinResult
     [System.Text.Json.Serialization.JsonPropertyName("status")] public int Status { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("body")] public string? Body { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("error")] public string? Error { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("duration")] public double Duration { get; set; }
 }
