@@ -37,18 +37,66 @@ namespace Probe4
                         Username = proxy.Username,
                         Password = proxy.Password
                     },
+                    HttpCredentials = new HttpCredentials {
+                        Username = proxy.Username,
+                        Password = proxy.Password
+                    },
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 }
                 };
 
                 var context = await browser.NewContextAsync(contextOptions);
+
+                // Stealth scripts
+                await context.AddInitScriptAsync(@"
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+                    delete navigator.__proto__.webdriver;
+                    window.chrome = { runtime: {} };
+                ");
+
                 var page = await context.NewPageAsync();
 
-                Logger.Log("Navigating to cs.money...");
-                await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
+                Logger.Log($"[Proxy {proxy.Host}] Navigating to cs.money...");
+                var response = await page.GotoAsync("https://cs.money/ru/csgo/trade/", new PageGotoOptions
                 {
                     WaitUntil = WaitUntilState.NetworkIdle,
-                    Timeout = 60000
+                    Timeout = 90000
                 });
+
+                // Wait for Cloudflare challenge to pass
+                Logger.Log($"[Proxy {proxy.Host}] Waiting for Cloudflare challenge...");
+                for (int i = 0; i < 30; i++)
+                {
+                    var title = await page.TitleAsync();
+                    if (title.Contains("CS.MONEY") && !title.Contains("Just a moment"))
+                    {
+                        Logger.Log($"[Proxy {proxy.Host}] Challenge passed! Title: {title}");
+                        break;
+                    }
+                    await Task.Delay(2000);
+                }
+
+                // Session Warm-up: Wait for a successful API call
+                Logger.Log($"[Proxy {proxy.Host}] Waiting for session warm-up...");
+
+                var warmUpScript = @"
+                    async () => {
+                        const url = '/5.0/load_bots_inventory/730?limit=1&offset=0&order=asc&sort=price';
+                        for (let i = 0; i < 10; i++) {
+                            try {
+                                const res = await fetch(url, { headers: { 'X-Client-App': 'web_mobile' } });
+                                if (res.status === 200) return true;
+                                if (res.status === 403) {
+                                    // Maybe try to move mouse to show activity
+                                }
+                            } catch (e) {}
+                            await new Promise(r => setTimeout(r, 2000));
+                        }
+                        return false;
+                    }
+                ";
+
+                bool warmedUp = await page.EvaluateAsync<bool>(warmUpScript);
+                Logger.Log($"[Proxy {proxy.Host}] Warm-up result: {warmedUp}");
 
                 var cookies = await context.CookiesAsync();
                 var userAgent = await page.EvaluateAsync<string>("navigator.userAgent");
@@ -60,12 +108,17 @@ namespace Probe4
                     CookieString = string.Join("; ", cookies.Select(c => $"{c.Name}={c.Value}"))
                 };
 
-                Logger.Log("Session refreshed successfully.");
+                if (!cookies.Any(c => c.Name == "cf_clearance"))
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] WARNING: cf_clearance cookie not found!");
+                }
+
+                Logger.Log($"[Proxy {proxy.Host}] Session refreshed successfully.");
                 return session;
             }
             catch (Exception ex)
             {
-                Logger.LogError("Failed to refresh session", ex);
+                Logger.LogError($"[Proxy {proxy.Host}] Failed to refresh session", ex);
                 return null;
             }
         }

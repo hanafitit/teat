@@ -12,6 +12,7 @@
     <Compile Include="DataStructures.cs" />
     <Compile Include="SessionManager.cs" />
     <Compile Include="MonitoringEngine.cs" />
+    <Compile Include="Diagnosis.cs" />
   </ItemGroup>
 
   <ItemGroup>

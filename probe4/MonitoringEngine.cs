@@ -55,7 +55,6 @@ namespace Probe4
         {
             if (string.IsNullOrEmpty(cookieString)) return;
 
-            var uri = new Uri("https://cs.money");
             var cookies = cookieString.Split(';');
             foreach (var cookie in cookies)
             {
@@ -64,7 +63,9 @@ namespace Probe4
                 {
                     var name = parts[0].Trim();
                     var value = parts[1].Trim();
-                    _cookieContainer.Add(uri, new Cookie(name, value));
+                    // Add for both .cs.money and cs.money to ensure Cloudflare cookies are picked up
+                    _cookieContainer.Add(new Cookie(name, value, "/", ".cs.money"));
+                    _cookieContainer.Add(new Cookie(name, value, "/", "cs.money"));
                 }
             }
         }
@@ -87,6 +88,7 @@ namespace Probe4
                 request.Headers.TryAddWithoutValidation("sec-fetch-dest", "empty");
                 request.Headers.TryAddWithoutValidation("sec-fetch-mode", "cors");
                 request.Headers.TryAddWithoutValidation("sec-fetch-site", "same-origin");
+                request.Headers.TryAddWithoutValidation("X-Kl-Ajax-Request", "Ajax_Request");
 
                 var response = await _httpClient.SendAsync(request);
 
