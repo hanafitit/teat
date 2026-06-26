@@ -21,6 +21,8 @@ namespace Probe4
         public string Username { get; set; }
         public string Password { get; set; }
         public MonitoringEngine? Engine { get; set; }
+        public SessionData? Session { get; set; }
+        public DateTime LastRefresh { get; set; } = DateTime.MinValue;
         public DateTime BannedUntil { get; set; } = DateTime.MinValue;
         public bool IsBanned => DateTime.UtcNow < BannedUntil;
 

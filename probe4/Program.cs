@@ -34,13 +34,11 @@ namespace Probe4
 
         static readonly List<ProxyInfo> ProxyList = new List<ProxyInfo>
         {
-            new ProxyInfo("38.154.203.95", 5863, "ycmhblvu", "htols81cakkl"),
             new ProxyInfo("64.137.96.74", 6641, "ycmhblvu", "htols81cakkl"),
+            new ProxyInfo("38.154.203.95", 5863, "ycmhblvu", "htols81cakkl"),
             new ProxyInfo("142.111.67.146", 5611, "ycmhblvu", "htols81cakkl")
         };
 
-        static SessionData? _currentSession;
-        static DateTime _lastRefresh = DateTime.MinValue;
         static int _poolFailures = 0;
 
         static async Task Main(string[] args)
@@ -48,7 +46,13 @@ namespace Probe4
             // Critical: Disable default .NET telemetry headers (traceparent)
             AppContext.SetSwitch("System.Net.Http.EnableActivityPropagation", false);
 
-            Logger.Log("Starting Monitoring Engine v5...");
+            if (args.Contains("--diagnosis"))
+            {
+                await Diagnosis.RunAsync();
+                return;
+            }
+
+            Logger.Log("Starting Monitoring Engine v5.1 (Per-Proxy Sessions)...");
 
             var skinSet = new HashSet<string>(SkinNames);
             var random = new Random();
@@ -56,51 +60,36 @@ namespace Probe4
 
             while (true)
             {
-                bool forceRefresh = false;
-                if (_currentSession == null || (DateTime.UtcNow - _lastRefresh).TotalMinutes >= 15)
+                // Refresh sessions for proxies that need it
+                var refreshTasks = new List<Task>();
+                foreach (var p in ProxyList)
                 {
-                    Logger.Log(_currentSession == null ? "Initial session refresh..." : "Scheduled 15-min session refresh...");
-                    forceRefresh = true;
-                }
-
-                if (_poolFailures >= 3)
-                {
-                    Logger.Log("3 consecutive whole-pool failures. Forcing session refresh...");
-                    forceRefresh = true;
-                    _poolFailures = 0;
-                }
-
-                if (forceRefresh)
-                {
-                    _currentSession = await SessionManager.RefreshSessionAsync(ProxyList[0]);
-                    if (_currentSession != null)
+                    if (p.Session == null || (DateTime.UtcNow - p.LastRefresh).TotalMinutes >= 15)
                     {
-                        _lastRefresh = DateTime.UtcNow;
-                        // Initialize or update engines with new cookies
-                        foreach (var p in ProxyList)
-                        {
-                            if (p.Engine == null)
+                        refreshTasks.Add(Task.Run(async () => {
+                            var session = await SessionManager.RefreshSessionAsync(p);
+                            if (session != null)
                             {
-                                p.Engine = new MonitoringEngine(p, _currentSession.CookieString);
+                                p.Session = session;
+                                p.LastRefresh = DateTime.UtcNow;
+                                if (p.Engine == null)
+                                    p.Engine = new MonitoringEngine(p, session.CookieString);
+                                else
+                                    p.Engine.UpdateCookies(session.CookieString);
                             }
-                            else
-                            {
-                                p.Engine.UpdateCookies(_currentSession.CookieString);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        Logger.Log("Failed to refresh session. Retrying in 5 seconds...");
-                        await Task.Delay(5000);
-                        continue;
+                        }));
                     }
                 }
 
-                var activeProxies = ProxyList.Where(p => !p.IsBanned).ToList();
+                if (refreshTasks.Any())
+                {
+                    await Task.WhenAll(refreshTasks);
+                }
+
+                var activeProxies = ProxyList.Where(p => !p.IsBanned && p.Engine != null).ToList();
                 if (activeProxies.Count == 0)
                 {
-                    Logger.Log("No active proxies available (all banned). Waiting 10 seconds...");
+                    Logger.Log("No active proxies with sessions available. Waiting 10 seconds...");
                     _poolFailures++;
                     await Task.Delay(10000);
                     continue;
@@ -139,17 +128,30 @@ namespace Probe4
                 var flatResults = allResults.SelectMany(r => r).ToList();
                 int okCount = flatResults.Count(r => r.Status == 200);
                 int rateLimitCount = flatResults.Count(r => r.Status == 429);
-                int errorCount = flatResults.Count(r => r.Status != 200 && r.Status != 429);
+                int forbiddenCount = flatResults.Count(r => r.Status == 403);
+                int errorCount = flatResults.Count(r => r.Status != 200 && r.Status != 429 && r.Status != 403);
 
                 long duration = sw.ElapsedMilliseconds - startTime;
-                Logger.Log($"Cycle complete in {duration}ms | OK: {okCount} | 429: {rateLimitCount} | Errors: {errorCount}");
+                Logger.Log($"Cycle complete in {duration}ms | OK: {okCount} | 403: {forbiddenCount} | 429: {rateLimitCount} | Errors: {errorCount}");
 
                 if (okCount == 0 && items.Count > 0)
                 {
                     _poolFailures++;
+                    if (forbiddenCount > 0)
+                    {
+                        // Immediate refresh if forbidden
+                        foreach(var p in ProxyList) p.Session = null;
+                    }
                 }
                 else
                 {
+                    _poolFailures = 0;
+                }
+
+                if (_poolFailures >= 3)
+                {
+                    Logger.Log("3 consecutive whole-pool failures. Forcing all sessions refresh...");
+                    foreach(var p in ProxyList) p.Session = null;
                     _poolFailures = 0;
                 }
 
