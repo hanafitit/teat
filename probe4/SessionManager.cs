@@ -26,10 +26,6 @@ namespace Probe4
                         Username = proxy.Username,
                         Password = proxy.Password
                     },
-                    HttpCredentials = new HttpCredentials {
-                        Username = proxy.Username,
-                        Password = proxy.Password
-                    },
                     UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                     ViewportSize = new ViewportSize { Width = 1280, Height = 720 },
                     Args = new[] {
