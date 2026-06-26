@@ -64,15 +64,58 @@ namespace Probe4
 
                 // Wait for Cloudflare challenge to pass
                 Logger.Log($"[Proxy {proxy.Host}] Waiting for Cloudflare challenge...");
+                bool challengePassed = false;
                 for (int i = 0; i < 30; i++)
                 {
                     var title = await page.TitleAsync();
                     if (title.Contains("CS.MONEY") && !title.Contains("Just a moment"))
                     {
                         Logger.Log($"[Proxy {proxy.Host}] Challenge passed! Title: {title}");
+                        challengePassed = true;
                         break;
                     }
                     await Task.Delay(2000);
+                }
+
+                if (!challengePassed)
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] Challenge NOT passed (timeout).");
+                }
+
+                // Human Emulation
+                Logger.Log($"[Proxy {proxy.Host}] Performing human emulation...");
+                var random = new Random();
+                await page.Mouse.MoveAsync(random.Next(100, 1000), random.Next(100, 600));
+                await Task.Delay(random.Next(200, 500));
+                await page.Mouse.MoveAsync(random.Next(100, 1000), random.Next(100, 600));
+                await Task.Delay(random.Next(200, 500));
+
+                await page.EvaluateAsync("window.scrollBy(0, 400)");
+                await Task.Delay(500);
+                await page.EvaluateAsync("window.scrollBy(0, -400)");
+                await Task.Delay(500);
+
+                await page.ClickAsync("body", new PageClickOptions { Position = new Position { X = random.Next(10, 100), Y = random.Next(10, 100) } });
+                await Task.Delay(1000);
+
+                // Hard Cookie Wait
+                Logger.Log($"[Proxy {proxy.Host}] Waiting for cf_clearance cookie...");
+                bool cookieFound = false;
+                for (int i = 0; i < 10; i++)
+                {
+                    var currentCookies = await context.CookiesAsync();
+                    if (currentCookies.Any(c => c.Name == "cf_clearance"))
+                    {
+                        Logger.Log($"[Proxy {proxy.Host}] cf_clearance cookie found after {i + 1} seconds.");
+                        cookieFound = true;
+                        break;
+                    }
+                    await Task.Delay(1000);
+                }
+
+                if (!cookieFound)
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] WARNING: cf_clearance cookie NOT found after wait.");
                 }
 
                 // Session Warm-up: Wait for a successful API call
@@ -85,9 +128,6 @@ namespace Probe4
                             try {
                                 const res = await fetch(url, { headers: { 'X-Client-App': 'web_mobile' } });
                                 if (res.status === 200) return true;
-                                if (res.status === 403) {
-                                    // Maybe try to move mouse to show activity
-                                }
                             } catch (e) {}
                             await new Promise(r => setTimeout(r, 2000));
                         }
@@ -97,6 +137,15 @@ namespace Probe4
 
                 bool warmedUp = await page.EvaluateAsync<bool>(warmUpScript);
                 Logger.Log($"[Proxy {proxy.Host}] Warm-up result: {warmedUp}");
+
+                if (!warmedUp)
+                {
+                    Logger.Log($"[Proxy {proxy.Host}] Warm-up FAILED. Session might be invalid.");
+                    // According to requirements, failure in warm-up means we should return null or handle retry.
+                    // For now, we continue but the warning is logged. The user said:
+                    // "It should be considered a Failure if the warmUpScript fails, even if the cookie is present."
+                    return null;
+                }
 
                 var cookies = await context.CookiesAsync();
                 var userAgent = await page.EvaluateAsync<string>("navigator.userAgent");
