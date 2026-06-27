@@ -47,18 +47,18 @@ namespace Probe4
             // Critical: Disable default .NET telemetry headers (traceparent)
             AppContext.SetSwitch("System.Net.Http.EnableActivityPropagation", false);
 
-            if (args.Contains("--diagnosis"))
-            {
-                await Diagnosis.RunAsync();
-                return;
-            }
-
             // Start GOST Tunnel
             GostTunnelManager.Start(ProxyList);
 
             // Ensure GOST is stopped on application exit
             AppDomain.CurrentDomain.ProcessExit += (s, e) => GostTunnelManager.Stop();
             Console.CancelKeyPress += (s, e) => { GostTunnelManager.Stop(); Environment.Exit(0); };
+
+            if (args.Contains("--diagnosis"))
+            {
+                await Diagnosis.RunAsync();
+                return;
+            }
 
             Logger.Log("Starting Monitoring Engine v5.1 (Per-Proxy Sessions)...");
 
