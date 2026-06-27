@@ -40,12 +40,28 @@ namespace Probe4
 
             try
             {
-                Logger.Log($"[GostTunnelManager] Starting GOST with args: {startInfo.Arguments}");
+                // Verify gost.exe exists in current directory or app directory
+                if (!System.IO.File.Exists(startInfo.FileName))
+                {
+                    var appDirFile = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gost.exe");
+                    if (System.IO.File.Exists(appDirFile))
+                    {
+                        startInfo.FileName = appDirFile;
+                    }
+                    else
+                    {
+                        Logger.Log($"[GostTunnelManager] WARNING: gost.exe not found in working directory or base directory. Attempting to run as is...");
+                    }
+                }
+
+                Logger.Log($"[GostTunnelManager] Starting GOST from: {startInfo.FileName}");
+                Logger.Log($"[GostTunnelManager] Args: {startInfo.Arguments}");
+
                 _gostProcess = Process.Start(startInfo);
 
                 if (_gostProcess == null)
                 {
-                    Logger.Log("[GostTunnelManager] CRITICAL: Failed to start GOST process.");
+                    Logger.Log("[GostTunnelManager] CRITICAL: Failed to start GOST process (Process.Start returned null).");
                     return;
                 }
 
@@ -55,7 +71,16 @@ namespace Probe4
                 _gostProcess.BeginOutputReadLine();
                 _gostProcess.BeginErrorReadLine();
 
-                Logger.Log("[GostTunnelManager] GOST process started successfully on 127.0.0.1:18080");
+                // Give it a second to bind to the port
+                System.Threading.Thread.Sleep(2000);
+
+                if (_gostProcess.HasExited)
+                {
+                    Logger.Log($"[GostTunnelManager] CRITICAL: GOST process exited immediately with code {_gostProcess.ExitCode}.");
+                    return;
+                }
+
+                Logger.Log("[GostTunnelManager] GOST process started and seems stable on 127.0.0.1:18080");
             }
             catch (Exception ex)
             {
