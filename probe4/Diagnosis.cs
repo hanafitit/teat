@@ -15,7 +15,10 @@ namespace Probe4
         {
             var proxies = new List<ProxyInfo>
             {
-                new ProxyInfo("127.0.0.1", 18080, "", "")
+                new ProxyInfo("38.154.203.95", 5863, "vluliwno", "kc0f04o4q3sj"),
+                new ProxyInfo("64.137.96.74", 6641, "vluliwno", "kc0f04o4q3sj"),
+                new ProxyInfo("142.111.67.146", 5611, "vluliwno", "kc0f04o4q3sj"),
+                new ProxyInfo("198.23.243.226", 6361, "vluliwno", "kc0f04o4q3sj")
             };
 
             foreach (var proxy in proxies)
