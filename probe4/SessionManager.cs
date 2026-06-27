@@ -46,39 +46,9 @@ namespace Probe4
                     }
                 };
 
-                /*
-                if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
-                {
-                    Logger.Log($"[Proxy {proxy.Host}] Установка глобальных HttpCredentials для контекста.");
-                    persistentOptions.HttpCredentials = new HttpCredentials
-                    {
-                        Username = proxy.Username,
-                        Password = proxy.Password
-                    };
-                }
-                */
-
                 Logger.Log($"[Proxy {proxy.Host}] Запуск PersistentContext...");
                 await using var context = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, persistentOptions);
                 Logger.Log($"[Proxy {proxy.Host}] Контекст успешно запущен.");
-
-                /*
-                // Решение через RouteAsync для принудительной вставки Proxy-Authorization
-                if (!string.IsNullOrEmpty(proxy.Username) && !string.IsNullOrEmpty(proxy.Password))
-                {
-                    Logger.Log($"[Proxy {proxy.Host}] Настройка RouteAsync для Proxy-Authorization...");
-                    var authHeader = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{proxy.Username}:{proxy.Password}"));
-
-                    await context.RouteAsync("**", async route =>
-                    {
-                        var headers = new Dictionary<string, string>(route.Request.Headers)
-                        {
-                            ["Proxy-Authorization"] = $"Basic {authHeader}"
-                        };
-                        await route.ContinueAsync(new RouteContinueOptions { Headers = headers });
-                    });
-                }
-                */
 
                 // Логирование на уровне контекста
                 context.RequestFailed += (_, e) => {
