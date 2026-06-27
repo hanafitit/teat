@@ -15,8 +15,10 @@ namespace Probe4
         {
             var proxies = new List<ProxyInfo>
             {
-                new ProxyInfo("142.111.67.146", 5611, "ycmhblvu", "htols81cakkl"),
-                new ProxyInfo("64.137.96.74", 6641, "ycmhblvu", "htols81cakkl")
+                new ProxyInfo("38.154.203.95", 5863, "vluliwno", "kc0f04o4q3sj"),
+                new ProxyInfo("64.137.96.74", 6641, "vluliwno", "kc0f04o4q3sj"),
+                new ProxyInfo("142.111.67.146", 5611, "vluliwno", "kc0f04o4q3sj"),
+                new ProxyInfo("198.23.243.226", 6361, "vluliwno", "kc0f04o4q3sj")
             };
 
             foreach (var proxy in proxies)
@@ -43,8 +45,7 @@ namespace Probe4
             try {
                 var context = await browser.NewContextAsync(new BrowserNewContextOptions {
                     UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                    Proxy = new Proxy { Server = $"http://{proxy.Host}:{proxy.Port}", Username = proxy.Username, Password = proxy.Password },
-                    HttpCredentials = new HttpCredentials { Username = proxy.Username, Password = proxy.Password },
+                    Proxy = new Proxy { Server = "http://127.0.0.1:18080" },
                     ViewportSize = new ViewportSize { Width = 1920, Height = 1080 }
                 });
 

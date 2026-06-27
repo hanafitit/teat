@@ -34,9 +34,10 @@ namespace Probe4
 
         static readonly List<ProxyInfo> ProxyList = new List<ProxyInfo>
         {
-            new ProxyInfo("64.137.96.74", 6641, "ycmhblvu", "htols81cakkl"),
-            new ProxyInfo("38.154.203.95", 5863, "ycmhblvu", "htols81cakkl"),
-            new ProxyInfo("142.111.67.146", 5611, "ycmhblvu", "htols81cakkl")
+            new ProxyInfo("38.154.203.95", 5863, "vluliwno", "kc0f04o4q3sj"),
+            new ProxyInfo("64.137.96.74", 6641, "vluliwno", "kc0f04o4q3sj"),
+            new ProxyInfo("142.111.67.146", 5611, "vluliwno", "kc0f04o4q3sj"),
+            new ProxyInfo("198.23.243.226", 6361, "vluliwno", "kc0f04o4q3sj")
         };
 
         static int _poolFailures = 0;
