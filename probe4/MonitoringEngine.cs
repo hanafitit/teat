@@ -26,10 +26,7 @@ namespace Probe4
 
             var handler = new SocketsHttpHandler
             {
-                Proxy = new WebProxy($"{proxy.Host}:{proxy.Port}")
-                {
-                    Credentials = new NetworkCredential(proxy.Username, proxy.Password)
-                },
+                Proxy = new WebProxy("http://127.0.0.1:18080"),
                 UseProxy = true,
                 UseCookies = true,
                 CookieContainer = _cookieContainer,

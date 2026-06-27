@@ -13,6 +13,7 @@
     <Compile Include="SessionManager.cs" />
     <Compile Include="MonitoringEngine.cs" />
     <Compile Include="Diagnosis.cs" />
+    <Compile Include="GostTunnelManager.cs" />
   </ItemGroup>
 
   <ItemGroup>

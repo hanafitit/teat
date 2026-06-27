@@ -53,6 +53,13 @@ namespace Probe4
                 return;
             }
 
+            // Start GOST Tunnel
+            GostTunnelManager.Start(ProxyList);
+
+            // Ensure GOST is stopped on application exit
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => GostTunnelManager.Stop();
+            Console.CancelKeyPress += (s, e) => { GostTunnelManager.Stop(); Environment.Exit(0); };
+
             Logger.Log("Starting Monitoring Engine v5.1 (Per-Proxy Sessions)...");
 
             var skinSet = new HashSet<string>(SkinNames);
